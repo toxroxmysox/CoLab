@@ -1,0 +1,133 @@
+// ===== CoLabTest — single-page diagnostic probe for one endpoint =====
+// Depends on: Power Query Parameters  ClientId, ApiKey, Filters
+// Does NOT depend on CoLabGet / CoLabEndpoint — fully self-contained.
+//
+// Usage:
+//   CoLabTest("reviews", false)
+//   CoLabTest("feedback", true)       // applies Filters parameter
+//
+// Returns a record with fields:
+//   endpoint       (text)     — endpoint string that was tested
+//   success        (logical)  — true if HTTP status < 400 and no M exception
+//   status_code    (number)   — HTTP status returned (null on network exception)
+//   record_count   (number)   — records found on first page (0 on failure)
+//   has_more_pages (logical)  — true if next_page token is present
+//   columns        (list)     — field names from the first record
+//   sample_record  (record)   — first record returned (null on failure or empty)
+//   error_message  (text)     — human-readable error detail (null on success)
+let
+  BaseUrl        = "https://app.colabsoftware.com",
+  ClientIdParam  = Text.From(ClientId),
+  ApiKeyParam    = Text.From(ApiKey),
+  FiltersParam   = try Text.From(Filters) otherwise "",
+
+  RequestHeaders = [
+    Authorization  = ApiKeyParam,
+    #"X-Client-Id" = ClientIdParam,
+    Accept         = "application/json"
+  ],
+
+  // Mirrors CoLabGet ExtractList — handles data / records / items wrappers
+  ExtractRecords = (json as any) as list =>
+    if json = null then {}
+    else if Value.Is(json, type list) then json
+    else if Value.Is(json, type record) and Record.HasFields(json, "data") then
+      let d = json[data] in if Value.Is(d, type list) then d else if d = null then {} else {d}
+    else if Value.Is(json, type record) and Record.HasFields(json, "records") then json[records]
+    else if Value.Is(json, type record) and Record.HasFields(json, "items")   then json[items]
+    else {},
+
+  CoLabTest =
+    (endpoint as text, optional applyFilters as nullable logical) as record =>
+    let
+      Relative = "enterprise/v1/" & Text.Lower(Text.Trim(endpoint)),
+
+      // Default applyFilters to false for test probes — avoids unexpected filter side-effects
+      UseFilt = if applyFilters = null then false else applyFilters,
+
+      // Build filters JSON string exactly as CoLabGet does
+      FiltersJson =
+        if UseFilt and FiltersParam <> "" then
+          let parsed = try Json.Document(FiltersParam) otherwise null
+          in if parsed <> null and Value.Is(parsed, type record)
+             then Text.FromBinary(Json.FromValue(parsed))
+             else FiltersParam
+        else null,
+
+      // Single-page query — no next_page, no days, optional filters
+      Query = if FiltersJson <> null then [ filters = FiltersJson ] else [],
+
+      // Outer try catches network-level exceptions (timeout, DNS, TLS, etc.)
+      FetchAttempt =
+        try
+          let
+            raw =
+              Web.Contents(
+                BaseUrl,
+                [
+                  RelativePath         = Relative,
+                  Query                = Query,
+                  Headers              = RequestHeaders,
+                  // Handle all non-2xx ourselves so Power Query doesn't throw on HTTP errors
+                  ManualStatusHandling = {400, 401, 403, 404, 409, 422, 429, 500, 502, 503}
+                ]
+              ),
+
+            // Extract HTTP status from response metadata; default 200 if metadata unavailable
+            status   = try Record.Field(Value.Metadata(raw), "Response.Status") otherwise 200,
+            bodyText = try Text.FromBinary(raw) otherwise "",
+
+            // Only parse JSON on a successful response
+            json     = if status < 400 then try Json.Document(raw) otherwise null else null,
+
+            records  = ExtractRecords(json),
+
+            // Check for continuation token
+            nextPage =
+              if json = null then null
+              else if Value.Is(json, type record) and Record.HasFields(json, "next_page")
+              then json[next_page]
+              else null,
+
+            rowCount = List.Count(records),
+            firstRec = if rowCount > 0 then List.First(records) else null,
+
+            // Column names from first record (guard: first record must be a record, not a scalar)
+            colNames =
+              if firstRec <> null and Value.Is(firstRec, type record)
+              then Record.FieldNames(firstRec)
+              else {}
+          in
+            [
+              endpoint       = endpoint,
+              success        = status < 400,
+              status_code    = status,
+              record_count   = rowCount,
+              // Value.Is guards against null comparison quirks in M
+              has_more_pages = Value.Is(nextPage, type text) and nextPage <> "",
+              columns        = colNames,
+              sample_record  = firstRec,
+              error_message  =
+                if status >= 400
+                then "HTTP " & Number.ToText(status) & " — " & bodyText
+                else null
+            ],
+
+      // If the try block itself threw (network failure, bad credentials structure, etc.)
+      Result =
+        if FetchAttempt[HasError]
+        then [
+          endpoint       = endpoint,
+          success        = false,
+          status_code    = null,
+          record_count   = 0,
+          has_more_pages = false,
+          columns        = {},
+          sample_record  = null,
+          error_message  = "Exception: " & FetchAttempt[Error][Message]
+        ]
+        else FetchAttempt[Value]
+    in
+      Result
+in
+  CoLabTest

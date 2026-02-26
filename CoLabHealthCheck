@@ -1,0 +1,66 @@
+// ===== CoLabHealthCheck — runs CoLabTest against all known GET endpoints =====
+// Depends on: CoLabTest  (must be loaded as a function query in the same Power BI file)
+// Load as a regular query (not a function) to produce a summary table.
+//
+// Output columns:
+//   Endpoint       — endpoint string tested
+//   Success        — true / false
+//   Status_Code    — HTTP status (null on network exception)
+//   Record_Count   — records on first page
+//   Has_More_Pages — true if pagination would continue
+//   Column_Count   — number of fields in each record
+//   Columns        — comma-separated field names
+//   Error_Message  — null on success; human-readable detail on failure
+let
+  // All paginated GET endpoints supported by CoLabEndpoint.
+  // Add new endpoints here as they are built out.
+  KnownEndpoints = {
+    "reviews",
+    "users",
+    "users/roles",
+    "feedback",
+    "files",
+    "workspaces",
+    "portals",
+    "audit-records",
+    "checklist_templates"
+  },
+
+  // Probe each endpoint — applyFilters = false for a clean baseline test
+  Results = List.Transform(
+    KnownEndpoints,
+    (ep) =>
+      let
+        r = CoLabTest(ep, false)
+      in
+        [
+          Endpoint       = r[endpoint],
+          Success        = r[success],
+          Status_Code    = r[status_code],
+          Record_Count   = r[record_count],
+          Has_More_Pages = r[has_more_pages],
+          Column_Count   = List.Count(r[columns]),
+          // Empty list → "" via Text.Combine; safe on any list length
+          Columns        = Text.Combine(r[columns], ", "),
+          Error_Message  = r[error_message]
+        ]
+  ),
+
+  Source = Table.FromRecords(Results),
+
+  // Explicit types so Power BI loads columns correctly without auto-detection
+  Typed = Table.TransformColumnTypes(
+    Source,
+    {
+      {"Endpoint",       type text},
+      {"Success",        type logical},
+      {"Status_Code",    Int64.Type},
+      {"Record_Count",   Int64.Type},
+      {"Has_More_Pages", type logical},
+      {"Column_Count",   Int64.Type},
+      {"Columns",        type text},
+      {"Error_Message",  type text}
+    }
+  )
+in
+  Typed
