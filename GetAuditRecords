@@ -1,4 +1,4 @@
 let
-    Source = CoLabEndpoint("audit-records", true)
+    Source = CoLabEndpoint("audit-records", false, days)
 in
     Source
