@@ -1,0 +1,137 @@
+// ===== CoLabEndpoint — supports new object-style ?filters={} format (NO limit/pageLimit) =====
+let
+  BaseUrl          = "https://app.colabsoftware.com",
+  ClientIdParam    = Text.From(ClientId),
+  ApiKeyParam      = Text.From(ApiKey),
+  FiltersParam     = try Text.From(Filters) otherwise "",
+
+  Headers = [
+    Authorization  = ApiKeyParam,
+    #"X-Client-Id" = ClientIdParam,
+    Accept         = "application/json"
+  ],
+
+  // Reusable fetch (retries ONLY transient statuses)
+  FetchWithRetry =
+    (relativePath as text, queryRec as record, optional attempt as nullable number) as any =>
+    let
+      A = if attempt = null then 1 else attempt,
+      DelaySecs = Number.Power(2, A - 1),
+
+      TryResp =
+        let
+          raw =
+            Web.Contents(
+              BaseUrl,
+              [
+                RelativePath = relativePath,
+                Query = queryRec,
+                Headers = Headers,
+                ManualStatusHandling = {400,401,403,404,409,422,429,500,502,503}
+              ]
+            ),
+          status   = try Record.Field(Value.Metadata(raw), "Response.Status") otherwise null,
+          bodyText = try Text.FromBinary(raw) otherwise null
+        in
+          [Raw = raw, Status = status, Body = bodyText],
+
+      bodySafe    = if TryResp[Body] = null then "" else TryResp[Body],
+      isTransient = (TryResp[Status] <> null) and List.Contains({429,500,502,503}, TryResp[Status]),
+
+      Result =
+        if (TryResp[Status] <> null) and (TryResp[Status] >= 400) then
+          if isTransient and (A < 5) then
+            Function.InvokeAfter(
+              () => @FetchWithRetry(relativePath, queryRec, A + 1),
+              #duration(0, 0, DelaySecs, 0)
+            )
+          else
+            error ("HTTP " & Number.ToText(TryResp[Status]) & " from " & relativePath & " | " & bodySafe)
+        else
+          Json.Document(TryResp[Raw])
+    in
+      Result,
+
+  ExtractList = (json as any) as list =>
+    if json = null then {}
+    else if Value.Is(json, type list) then json
+    else if Value.Is(json, type record) and Record.HasFields(json, "data") then json[data]
+    else if Value.Is(json, type record) and Record.HasFields(json, "records") then json[records]
+    else if Value.Is(json, type record) and Record.HasFields(json, "items") then json[items]
+    else {},
+
+  ExtractNextToken = (json as any) as nullable text =>
+    if Value.Is(json, type record) and Record.HasFields(json, "next_page") then json[next_page]
+    else if Value.Is(json, type record) and Record.HasFields(json, "next") then json[next]
+    else null,
+
+  ListToTable = (lst as list) as table =>
+    let
+      tbl =
+        try Table.FromRecords(lst)
+        otherwise try Table.FromList(lst, Splitter.SplitByNothing(), {"Record"})
+        otherwise #table({}, {})
+    in
+      tbl,
+
+  // Build query per page (NO limit/pageLimit)
+  BuildQuery =
+    (nextToken as nullable text, applyFilters as logical, days as nullable number, extra as nullable record) as record =>
+    let
+      base     = if nextToken = null then [] else [ next_page = nextToken ],
+      withDays = if days <> null then Record.Combine({ base, [ days = Text.From(days) ] }) else base,
+
+      // === NEW FILTER FORMAT HANDLING ===
+      filtersObject =
+        if applyFilters and FiltersParam <> "" then
+          let
+            parsed = try Json.Document(FiltersParam) otherwise null,
+            textValue =
+              if parsed <> null and Value.Is(parsed, type record)
+              then Text.FromBinary(Json.FromValue(parsed))   // API expects JSON string
+              else FiltersParam
+          in
+            textValue
+        else
+          null,
+
+      withFilt = if filtersObject <> null then Record.Combine({ withDays, [ filters = filtersObject ] }) else withDays,
+      final    = if extra <> null then Record.Combine({ withFilt, extra }) else withFilt
+    in
+      final,
+
+  // Core token-paged fetcher
+  TokenPagedFetch =
+    (endpoint as text, optional applyFilters as nullable logical, optional days as nullable number, optional extraQuery as nullable record) as table =>
+    let
+      EndptLower = Text.Lower(Text.Trim(endpoint)),
+      Relative   = "enterprise/v1/" & EndptLower,
+      UseFilt    = if applyFilters = null then true else applyFilters,
+
+      GetOne = (tok as nullable text) as record =>
+        let
+          q       = BuildQuery(tok, UseFilt, days, extraQuery),
+          json    = FetchWithRetry(Relative, q),
+          records = ExtractList(json),
+          nextTok = ExtractNextToken(json)
+        in
+          [records = records, next = nextTok],
+
+      Pages =
+        List.Generate(
+          () => [res = GetOne(null), seen = {}],
+          each List.Count([res][records]) > 0 and ( [res][next] = null or not List.Contains([seen], [res][next]) ),
+          each [res = GetOne([res][next]), seen = if [res][next] = null then [seen] else List.Combine({[seen], {[res][next]}})],
+          each [res][records]
+        ),
+
+      Flat = List.Combine(Pages),
+      Tbl  = ListToTable(Flat)
+    in
+      Tbl,
+
+  CoLabEndpoint =
+    (endpoint as text, optional applyFilters as nullable logical, optional days as nullable number, optional extraQuery as nullable record) as table =>
+      TokenPagedFetch(endpoint, applyFilters, days, extraQuery)
+in
+  CoLabEndpoint
