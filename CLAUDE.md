@@ -278,6 +278,7 @@ Makes exactly **one** request (no pagination) and returns a diagnostic record. U
 | `columns` | list | Field names from the first record |
 | `sample_record` | record | First record returned (null on failure or empty result) |
 | `error_message` | text | Human-readable error detail (null on success) |
+| `raw_body_snippet` | text | First 200 chars of response body when JSON parse fails (null otherwise) |
 
 **Usage — paste into a blank query to debug interactively:**
 
@@ -315,6 +316,7 @@ Load as a regular query. Returns a table with one row per endpoint:
 | `Column_Count` | Number of fields per record |
 | `Columns` | Comma-separated field names |
 | `Error_Message` | null on success; error detail on failure |
+| `Raw_Body_Snippet` | Response body snippet when JSON parse fails (diagnostic) |
 
 **Workflow:** Run `CoLabHealthCheck` after any credential change, after updating `CoLabGet`, or
 when setting up a new Power BI file. A fully green table (all `Success = true`) confirms the
@@ -360,6 +362,13 @@ in
   in the PQ parameters, not in code.
 - **Power BI refresh:** `Web.Contents` with `RelativePath` and `Query` is the correct pattern for
   Power BI gateway compatibility. Do not move the base URL into `RelativePath`.
+- **Error truncation:** Error messages from `FetchWithRetry` and `CoLabTest` truncate response
+  bodies to 500 characters. If you need the full error body for debugging, use `CoLabTest` and
+  inspect the `raw_body_snippet` field or make a manual `Web.Contents` call.
+- **Retry diagnostics:** `FetchWithRetry` error messages include the attempt number (e.g.
+  "attempt 4 of 4") so you can tell whether retries were exhausted on a transient failure.
+- **Non-uniform records:** `ListToTable` uses `MissingField.UseNull` so records across pages
+  with different schemas merge safely — missing fields become null instead of erroring.
 
 ---
 
