@@ -3,7 +3,8 @@ let
     UsersRaw = CoLabEndpoint("users", false),
 
     // pick id/email/name, normalize id to text
-    UKeep0 = Table.SelectColumns(UsersRaw, {"id","email","name"}, MissingField.Ignore),
+    // "name" omitted — not in final output and collides with workspace "name" during expansion
+    UKeep0 = Table.SelectColumns(UsersRaw, {"id","email"}, MissingField.Ignore),
     UKeep1 = Table.TransformColumns(UKeep0, {{"id", each Text.From(_), type text}}),
     Users  = Table.Distinct(UKeep1, {"id"}),
     UBuf   = Table.Buffer(Users),
