@@ -1,0 +1,19 @@
+let
+    // Users from the same source
+    UsersRaw = CoLabEndpoint("users", false),
+
+    // pick id/email/name, normalize id to text
+    UKeep0 = Table.SelectColumns(UsersRaw, {"id","email","name"}, MissingField.Ignore),
+    UKeep1 = Table.TransformColumns(UKeep0, {{"id", each Text.From(_), type text}}),
+    Users  = Table.Distinct(UKeep1, {"id"}),
+    UBuf   = Table.Buffer(Users),
+
+    // invoke per user
+    WithWs   = Table.AddColumn(UBuf, "workspaces", each fnUserWorkspaces([id])),
+    #"Expanded workspaces" = Table.ExpandTableColumn(WithWs, "workspaces", {"workspace", "workspace_role"}, {"workspaces.workspace", "workspaces.workspace_role"}),
+    #"Expanded workspaces.workspace" = Table.ExpandRecordColumn(#"Expanded workspaces", "workspaces.workspace", {"id", "name"}, {"id.1", "name"}),
+    #"Renamed Columns" = Table.RenameColumns(#"Expanded workspaces.workspace",{{"id.1", "workspace_id"}, {"name", "workspace_name"}, {"workspaces.workspace_role", "workspace_role"}, {"id", "user_id"}}),
+    #"Removed Duplicates" = Table.Distinct(#"Renamed Columns", {"user_id", "workspace_id"}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Removed Duplicates",{{"user_id", Int64.Type}, {"email", type text}, {"workspace_id", Int64.Type}, {"workspace_name", type text}, {"workspace_role", type text}})
+in
+    #"Changed Type"
