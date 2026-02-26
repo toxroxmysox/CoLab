@@ -28,7 +28,6 @@ let
     (relativePath as text, queryRec as record, optional attempt as nullable number) as any =>
     let
       A = if attempt = null then 1 else attempt,
-      DelaySecs = Number.Power(2, A - 1),
 
       TryResp =
         let
@@ -49,6 +48,8 @@ let
 
       bodySafe    = if TryResp[Body] = null then "" else TryResp[Body],
       isTransient = (TryResp[Status] <> null) and List.Contains({429,500,502,503}, TryResp[Status]),
+      // 429 rate-limit requires a full 60 s cooldown; other transients use exponential backoff
+      DelaySecs   = if TryResp[Status] = 429 then 60 else Number.Power(2, A - 1),
 
       Result =
         if (TryResp[Status] <> null) and (TryResp[Status] >= 400) then
@@ -59,7 +60,7 @@ let
             )
           else
             error ("HTTP " & Number.ToText(TryResp[Status]) & " from " & relativePath
-                   & " (attempt " & Number.ToText(A) & " of 4) | "
+                   & " (attempt " & Number.ToText(A) & " of 5) | "
                    & Text.Start(bodySafe, 500))
         else
           let
