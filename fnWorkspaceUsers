@@ -1,0 +1,68 @@
+// fnWsUsers — robust pager for /workspaces/{id}/users
+let
+  fnWsUsers =
+  (wid as text) as table =>
+  let
+      BaseUrl = "https://app.colabsoftware.com",
+      Headers = [
+          Authorization  = Text.From(ApiKey),
+          #"X-Client-Id" = Text.From(ClientId),
+          Accept         = "application/json"
+      ],
+
+      // fetch one page; returns [records=list, next=nullable text]
+      GetPage = (next as nullable text) as record =>
+          let
+              Q     = if next = null then [] else [ next_page = next ],
+              Resp  = Web.Contents(
+                          BaseUrl,
+                          [
+                              RelativePath = "enterprise/v1/workspaces/" & wid & "/users",
+                              Query        = Q,
+                              Headers      = Headers
+                          ]
+                      ),
+              Json  = Json.Document(Resp),
+              Recs  =
+                  if Json = null then {}
+                  else if Value.Is(Json, type list) then Json
+                  else if Value.Is(Json, type record) and Record.HasFields(Json, "data") then Json[data]
+                  else if Value.Is(Json, type record) and Record.HasFields(Json, "records") then Json[records]
+                  else {},
+              NextT = if Value.Is(Json, type record) and Record.HasFields(Json, "next_page") then Json[next_page]
+                      else if Value.Is(Json, type record) and Record.HasFields(Json, "next") then Json[next]
+                      else null
+          in
+              [records = Recs, next = NextT],
+
+      // iterate until next=null; also guard with max pages to prevent runaway
+      MaxPages = 1000,
+      Pages =
+          List.Generate(
+              () => [p = GetPage(null), i = 1],
+              each List.Count([p][records]) > 0 and [i] <= MaxPages,
+              each [ p = if [p][next] = null then [records = {}, next = null] else GetPage([p][next]), i = [i] + 1 ],
+              each [p][records]
+          ),
+
+      Flat = List.Combine(Pages),
+
+      // shape columns
+      T0 =
+          try Table.FromRecords(Flat)
+          otherwise try Table.FromList(Flat, Splitter.SplitByNothing(), {"Record"})
+          otherwise #table({}, {}),
+
+      T1 = if Table.HasColumns(T0, "id") then Table.RenameColumns(T0, {{"id","user_id"}}) else T0,
+      Keep = List.Intersect({{"user_id","email","name"}, Table.ColumnNames(T1)}),
+      T2 = if List.Count(Keep) > 0 then Table.SelectColumns(T1, Keep, MissingField.Ignore) else T1,
+      T3 = Table.AddColumn(T2, "workspace_id", each wid, type text),
+
+      // de-dup in case the API returns overlaps
+      Out = if Table.HasColumns(T3, "user_id")
+            then Table.Distinct(T3, {"workspace_id","user_id"})
+            else Table.Distinct(T3)
+  in
+      Out
+in
+  fnWsUsers
