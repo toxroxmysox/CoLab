@@ -15,6 +15,7 @@
 //   columns        (list)     — field names from the first record
 //   sample_record  (record)   — first record returned (null on failure or empty)
 //   error_message  (text)     — human-readable error detail (null on success)
+//   raw_body_snippet (text)  — first 200 chars of response body when JSON parse fails (null otherwise)
 let
   BaseUrl        = "https://app.colabsoftware.com",
   ClientIdParam  = Text.From(ClientId),
@@ -109,7 +110,11 @@ let
               sample_record  = firstRec,
               error_message  =
                 if status >= 400
-                then "HTTP " & Number.ToText(status) & " — " & bodyText
+                then "HTTP " & Number.ToText(status) & " — " & Text.Start(bodyText, 500)
+                else null,
+              raw_body_snippet =
+                if status < 400 and json = null and bodyText <> ""
+                then Text.Start(bodyText, 200)
                 else null
             ],
 
@@ -124,7 +129,8 @@ let
           has_more_pages = false,
           columns        = {},
           sample_record  = null,
-          error_message  = "Exception: " & FetchAttempt[Error][Message]
+          error_message  = "Exception: " & FetchAttempt[Error][Message],
+          raw_body_snippet = null
         ]
         else FetchAttempt[Value]
     in

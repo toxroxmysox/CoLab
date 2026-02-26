@@ -11,6 +11,7 @@
 //   Column_Count   — number of fields in each record
 //   Columns        — comma-separated field names
 //   Error_Message  — null on success; human-readable detail on failure
+//   Raw_Body_Snippet — first 200 chars of response when JSON parse fails (diagnostic)
 let
   // All paginated GET endpoints supported by CoLabEndpoint.
   // Add new endpoints here as they are built out.
@@ -31,7 +32,17 @@ let
     KnownEndpoints,
     (ep) =>
       let
-        r = CoLabTest(ep, false)
+        r = try CoLabTest(ep, false) otherwise [
+              endpoint       = ep,
+              success        = false,
+              status_code    = null,
+              record_count   = 0,
+              has_more_pages = false,
+              columns        = {},
+              sample_record  = null,
+              error_message  = "CoLabTest threw an unexpected error",
+              raw_body_snippet = null
+            ]
       in
         [
           Endpoint       = r[endpoint],
@@ -42,7 +53,8 @@ let
           Column_Count   = List.Count(r[columns]),
           // Empty list → "" via Text.Combine; safe on any list length
           Columns        = Text.Combine(r[columns], ", "),
-          Error_Message  = r[error_message]
+          Error_Message  = r[error_message],
+          Raw_Body_Snippet = r[raw_body_snippet]
         ]
   ),
 
@@ -54,12 +66,13 @@ let
     {
       {"Endpoint",       type text},
       {"Success",        type logical},
-      {"Status_Code",    Int64.Type},
+      {"Status_Code",    type nullable number},
       {"Record_Count",   Int64.Type},
       {"Has_More_Pages", type logical},
       {"Column_Count",   Int64.Type},
       {"Columns",        type text},
-      {"Error_Message",  type text}
+      {"Error_Message",  type text},
+      {"Raw_Body_Snippet", type text}
     }
   )
 in
