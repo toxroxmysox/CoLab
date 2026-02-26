@@ -1,0 +1,11 @@
+let
+    Source = CoLabEndpoint(
+        "audit-records",
+        false,
+        null,
+        [
+            filters = "{""operation"":{""operator"":""contains"",""value"":""LOGIN""}}"
+        ]
+    )
+in
+    Source

@@ -1,0 +1,4 @@
+let
+    Source = CoLabEndpoint("workspaces", false)
+in
+    Source
