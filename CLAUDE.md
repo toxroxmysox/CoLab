@@ -15,6 +15,8 @@ separate tables in the Power BI data model.
 | File | Type | Role |
 |---|---|---|
 | `CoLabGet` | Power Query function | Core function — defines and returns `CoLabEndpoint` |
+| `CoLabTest` | Power Query function | Diagnostic probe — tests a single endpoint, returns a result record |
+| `CoLabHealthCheck` | Power Query query | Runs `CoLabTest` on all known endpoints, returns a summary table |
 | `GetReviews` | Power Query query | Example consumer — calls `CoLabEndpoint("reviews", false)` |
 | `ApiDocs` | JSON (OpenAPI 3.x) | Full API spec for `https://app.colabsoftware.com/enterprise/v1/` |
 | `CLAUDE.md` | Markdown | This file — repo context for AI-assisted development |
@@ -22,6 +24,13 @@ separate tables in the Power BI data model.
 > **Convention:** Files have no `.pq` extension in this repo. Each file is pasted directly into a
 > Power BI query or function. The file name matches the Power Query query/function name inside
 > Power BI Desktop.
+>
+> **Load order when setting up a new Power BI file:**
+> 1. Create the three PQ Parameters: `ClientId`, `ApiKey`, `Filters`
+> 2. Load `CoLabGet` as a function query named `CoLabGet`
+> 3. Load `CoLabTest` as a function query named `CoLabTest`
+> 4. Load `CoLabHealthCheck` as a regular query named `CoLabHealthCheck`
+> 5. Load data queries (`GetReviews`, etc.) last
 
 ---
 
@@ -230,6 +239,82 @@ Sort order values: `"asc"` | `"desc"`
 
 ---
 
+## Testing and Diagnostics
+
+### `CoLabTest` — probe a single endpoint
+
+**File:** `CoLabTest`
+**Depends on:** PQ Parameters `ClientId`, `ApiKey`, `Filters` (does **not** depend on `CoLabGet`)
+
+```powerquery
+CoLabTest(endpoint as text, optional applyFilters as nullable logical) as record
+```
+
+Makes exactly **one** request (no pagination) and returns a diagnostic record. Use this to:
+- Verify credentials are working before running full queries
+- Check what columns an endpoint returns before building a data query
+- Get a sample record to understand nested field structure
+- Diagnose 401/403/404 errors without running the full paginator
+
+**Return record fields:**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `endpoint` | text | Endpoint string that was tested |
+| `success` | logical | `true` if HTTP status < 400 and no M exception |
+| `status_code` | number | HTTP status (null on network-level exception) |
+| `record_count` | number | Records on the first page (0 on failure) |
+| `has_more_pages` | logical | `true` if a `next_page` token was present |
+| `columns` | list | Field names from the first record |
+| `sample_record` | record | First record returned (null on failure or empty result) |
+| `error_message` | text | Human-readable error detail (null on success) |
+
+**Usage — paste into a blank query to debug interactively:**
+
+```powerquery
+// Paste into a blank query, run, then inspect the record fields
+CoLabTest("reviews", false)
+```
+
+To inspect a specific field from the returned record:
+```powerquery
+CoLabTest("reviews", false)[columns]      // see column list
+CoLabTest("reviews", false)[sample_record] // see first row
+CoLabTest("reviews", false)[error_message] // see error if failed
+```
+
+**`applyFilters` defaults to `false`** in `CoLabTest` (opposite of `CoLabEndpoint`) so baseline
+probes always succeed even if the `Filters` parameter is misconfigured.
+
+---
+
+### `CoLabHealthCheck` — check all endpoints at once
+
+**File:** `CoLabHealthCheck`
+**Depends on:** `CoLabTest` (must be loaded first)
+
+Load as a regular query. Returns a table with one row per endpoint:
+
+| Column | Meaning |
+|---|---|
+| `Endpoint` | Endpoint string |
+| `Success` | `true` / `false` |
+| `Status_Code` | HTTP status |
+| `Record_Count` | Records on first page |
+| `Has_More_Pages` | `true` if data continues past first page |
+| `Column_Count` | Number of fields per record |
+| `Columns` | Comma-separated field names |
+| `Error_Message` | null on success; error detail on failure |
+
+**Workflow:** Run `CoLabHealthCheck` after any credential change, after updating `CoLabGet`, or
+when setting up a new Power BI file. A fully green table (all `Success = true`) confirms the
+connection is working before loading full data queries.
+
+**To add a new endpoint to the health check**, add its string to `KnownEndpoints` inside
+`CoLabHealthCheck`.
+
+---
+
 ## How to Add a New Query
 
 1. Create a new file (e.g. `GetUsers`) in the repo.
@@ -277,3 +362,5 @@ in
 - Relationship table linking `reviews[workspace][id]` → `workspaces[id]`, etc., for the
   Power BI data model star schema
 - Incremental refresh integration using `date_created` / `event_time` filter fields
+- `CoLabTest` extended to optionally probe with `applyFilters = true` so filter JSON can also
+  be validated before running full paginated queries
