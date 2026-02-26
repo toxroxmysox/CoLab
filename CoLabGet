@@ -120,8 +120,15 @@ let
       Pages =
         List.Generate(
           () => [res = GetOne(null), seen = {}],
-          each List.Count([res][records]) > 0 and ( [res][next] = null or not List.Contains([seen], [res][next]) ),
-          each [res = GetOne([res][next]), seen = if [res][next] = null then [seen] else List.Combine({[seen], {[res][next]}})],
+          each List.Count([res][records]) > 0,
+          each
+            let
+              nxt = [res][next] ?? ""
+            in
+              if nxt = "" or List.Contains([seen], nxt) then
+                [res = [records = {}, next = null], seen = [seen]]
+              else
+                [res = GetOne(nxt), seen = List.Combine({[seen], {nxt}})],
           each [res][records]
         ),
 

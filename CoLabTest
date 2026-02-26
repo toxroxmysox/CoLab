@@ -104,7 +104,7 @@ let
               status_code    = status,
               record_count   = rowCount,
               // Value.Is guards against null comparison quirks in M
-              has_more_pages = Value.Is(nextPage, type text) and nextPage <> "",
+              has_more_pages = (nextPage ?? "") <> "",
               columns        = colNames,
               sample_record  = firstRec,
               error_message  =

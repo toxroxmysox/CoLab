@@ -17,7 +17,15 @@ separate tables in the Power BI data model.
 | `CoLabGet` | Power Query function | Core function — defines and returns `CoLabEndpoint` |
 | `CoLabTest` | Power Query function | Diagnostic probe — tests a single endpoint, returns a result record |
 | `CoLabHealthCheck` | Power Query query | Runs `CoLabTest` on all known endpoints, returns a summary table |
-| `GetReviews` | Power Query query | Example consumer — calls `CoLabEndpoint("reviews", false)` |
+| `GetReviews` | Power Query query | Data query — calls `CoLabEndpoint("reviews", false)` |
+| `GetUsers` | Power Query query | Data query — calls `CoLabEndpoint("users", false)` |
+| `GetFeedback` | Power Query query | Data query — calls `CoLabEndpoint("feedback", true)` |
+| `GetFiles` | Power Query query | Data query — calls `CoLabEndpoint("files", false)` |
+| `GetWorkspaces` | Power Query query | Data query — calls `CoLabEndpoint("workspaces", false)` |
+| `GetPortals` | Power Query query | Data query — calls `CoLabEndpoint("portals", true)` |
+| `GetAuditRecords` | Power Query query | Data query — calls `CoLabEndpoint("audit-records", true)` |
+| `GetChecklistTemplates` | Power Query query | Data query — calls `CoLabEndpoint("checklist_templates", false)` |
+| `GetAuditLogins` | Power Query query | Filtered audit query — login operations only via `extraQuery` |
 | `ApiDocs` | JSON (OpenAPI 3.x) | Full API spec for `https://app.colabsoftware.com/enterprise/v1/` |
 | `CLAUDE.md` | Markdown | This file — repo context for AI-assisted development |
 
@@ -30,7 +38,9 @@ separate tables in the Power BI data model.
 > 2. Load `CoLabGet` as a function query named `CoLabGet`
 > 3. Load `CoLabTest` as a function query named `CoLabTest`
 > 4. Load `CoLabHealthCheck` as a regular query named `CoLabHealthCheck`
-> 5. Load data queries (`GetReviews`, etc.) last
+> 5. Load data queries (`GetReviews`, `GetUsers`, `GetFeedback`, `GetFiles`,
+>    `GetWorkspaces`, `GetPortals`, `GetAuditRecords`, `GetChecklistTemplates`,
+>    `GetAuditLogins`) last
 
 ---
 
@@ -355,8 +365,11 @@ in
 
 ## Planned / Future Work
 
-- Additional query files for each endpoint (`GetUsers`, `GetFeedback`, `GetFiles`,
-  `GetWorkspaces`, `GetPortals`, `GetAuditRecords`, `GetChecklistTemplates`)
+- Filter merging: enhance `BuildQuery` to merge `extraQuery` filters with the `Filters` PQ
+  parameter instead of overriding, enabling audit operation queries to also apply shared
+  workspace exclusions automatically
+- Additional audit operation queries (e.g. `GetAuditFileUploads`, `GetAuditReviewCreations`)
+  following the `GetAuditLogins` pattern
 - Sort parameter surfaced as a dedicated `CoLabEndpoint` argument
 - `page_size` exposed as an optional argument (API supports it via `extraQuery` already)
 - Relationship table linking `reviews[workspace][id]` → `workspaces[id]`, etc., for the
