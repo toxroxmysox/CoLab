@@ -1,5 +1,4 @@
 let
-    // workspaces from SAME source
     WsRaw   = CoLabEndpoint("workspaces", false),
     IdCol   = if Table.HasColumns(WsRaw,"id") then "id" else if Table.HasColumns(WsRaw,"workspaceId") then "workspaceId" else error "No workspace id column.",
     WsKeep0 = Table.SelectColumns(WsRaw, {IdCol, "name"}, MissingField.Ignore),
@@ -7,13 +6,19 @@ let
     Ws      = Table.TransformColumns(WsKeep1, {{"id", each Text.From(_), type text}}),
     WsBuf   = Table.Buffer(Ws),
 
-    // invoke function (same root source)
-    WithMembers = Table.AddColumn(WsBuf, "members", each fnWsUsers([id])),
-    #"Expanded members" = Table.ExpandTableColumn(WithMembers, "members", {"user", "workspace_role", "workspace_id"}, {"user", "workspace_role", "workspace_id"}),
-    #"Removed Columns" = Table.RemoveColumns(#"Expanded members",{"workspace_id"}),
-    #"Renamed Columns" = Table.RenameColumns(#"Removed Columns",{{"id", "workspace_id"}, {"name", "workspace_name"}}),
-    #"Expanded user" = Table.ExpandRecordColumn(#"Renamed Columns", "user", {"email", "id"}, {"email", "id"}),
-    #"Renamed Columns1" = Table.RenameColumns(#"Expanded user",{{"id", "user_id"}}),
-    #"Changed Type" = Table.TransformColumnTypes(#"Renamed Columns1",{{"workspace_id", Int64.Type}, {"workspace_name", type text}, {"email", type text}, {"user_id", Int64.Type}, {"workspace_role", type text}})
+    // fnWsUsers returns {user: record, workspace_role: text} — no workspace_id stamp
+    WithMembers          = Table.AddColumn(WsBuf, "members", each fnWsUsers([id])),
+    #"Expanded members"  = Table.ExpandTableColumn(WithMembers, "members", {"user", "workspace_role"}, {"user", "workspace_role"}),
+    #"Renamed Columns"   = Table.RenameColumns(#"Expanded members", {{"id", "workspace_id"}, {"name", "workspace_name"}}),
+    #"Expanded user"     = Table.ExpandRecordColumn(#"Renamed Columns", "user", {"email", "id"}, {"email", "id"}),
+    #"Renamed Columns1"  = Table.RenameColumns(#"Expanded user", {{"id", "user_id"}}),
+    #"Changed Type"      = Table.TransformColumnTypes(#"Renamed Columns1", {
+                               {"workspace_id",   Int64.Type},
+                               {"workspace_name", type text},
+                               {"email",          type text},
+                               {"user_id",        Int64.Type},
+                               {"workspace_role", type text}
+                           }),
+    Deduped = Table.Distinct(#"Changed Type", {"workspace_id", "user_id"})
 in
-    #"Changed Type"
+    Deduped
